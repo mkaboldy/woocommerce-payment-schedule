@@ -10,9 +10,9 @@ class WC_Payment_Schedule {
 
     // option key constants
 
-    // meta keys
-
     // action and filter keys
+
+    const FILTER_CREATE_CART_ITEM_TERMS = 'wc_payment_schedule_create_cart_item_terms';
 
     // nonce key
 
@@ -24,11 +24,13 @@ class WC_Payment_Schedule {
         add_action( 'add_meta_boxes', [ $this, 'register_meta_box' ], 10, 2 );
 
         // business logic
-        add_filter( 'wc_payment_schedule_create_cart_item_terms', array($this,'create_cart_item_terms' ), 10, 3);
+        add_filter( self::FILTER_CREATE_CART_ITEM_TERMS , array($this,'create_cart_item_terms' ), 10, 3); // private hook, host app must call it
+        add_action( 'woocommerce_checkout_update_order_meta', array($this,'checkout_update_order_meta'), 10, 2); // store payment schedule in order record
+        add_filter( 'woocommerce_order_get_total' , array($this,'checkout_payment_amount'), 10, 2); // get the first term for checkout
 
         // UI
-        add_action( 'woocommerce_cart_collaterals', array($this,'cart_collaterals'));
-
+        add_action( 'woocommerce_cart_totals_after_order_total', array($this,'after_order_total'));
+        add_action( 'woocommerce_review_order_after_order_total', array($this,'after_order_total'));
     }
 
     /**
@@ -44,44 +46,55 @@ class WC_Payment_Schedule {
         if ($delivery_timestamp - time() > strtotime("+60 days",0)) {
 
             $payment_schedule = new Payment_Schedule();
+            $payment_schedule->create_line_payment_schedule($line_total,$delivery_timestamp);
 
-            $first_term = round($line_total * 0.5);
-
-            $payment_schedule->add_term($first_term, date('m/d/Y'));
-            $payment_schedule->add_term($line_total - $first_term, date('m/d/Y',strtotime('-60 days',$delivery_timestamp)));
-
-            $cart_item_data['payment_schedule'] = $payment_schedule;
+            $cart_item_data[self::CART_ITEM_DATA_INDEX_PAYMENT_SCHEDULE] = $payment_schedule;
         }
 
         return $cart_item_data;
     }
     /**
-     * Print the payment schedule on the cart page, if applicable
-     * @hook woocommerce_after_cart_contents
+     * Summary of update_order_meta
+     * @param mixed $order_id
+     * @param mixed $data
+     * @return string
      */
-    public function cart_collaterals(){
+    public function checkout_update_order_meta($order_id, $data) {
+        $order = new WC_PS_Order(wc_get_order($order_id));
+        $order->create_payment_schedule();
+        return;
+    }
+    /**
+     * Return the first term of payment for checkout
+     * @hook woocommerce_order_get_total
+     * @param mixed $amount
+     * @param mixed $order
+     * @return mixed
+     */
+    public function checkout_payment_amount($amount, $order) {
+		if (is_checkout() ) {
+
+            // do this only once
+            remove_filter(current_filter(),array($this,__FUNCTION__));
+
+            $order = new WC_PS_Order(wc_get_order($order));
+
+            if ($order->has_payment_schedule()) {
+                return $order->get_first_amount();
+            }
+		}
+        return $amount;
+    }
+
+    /**
+     * Collect and print the payment schedule on the cart page, if applicable
+     * @hook woocommerce_cart_totals_after_order_total
+     * @hook woocommerce_review_order_after_order_total
+     */
+    public function after_order_total(){
         wp_enqueue_style('wc-payment-schedule', WC_PAYMENT_SCHEDULE_PLUGIN_URL . '/assets/css/wc-payment-schedule.css', [] , WC_PAYMENT_SCHEDULE_PLUGIN_VERSION);
 
-        /*
-		if ( is_checkout() ) {
-			return;
-		}
-        */
-
-        $cart_payment_schedule = array();
-
-        foreach ( WC()->cart->get_cart() as $cart_item) {
-            if (isset($cart_item[self::CART_ITEM_DATA_INDEX_PAYMENT_SCHEDULE])) {
-                $item_payment_terms = $cart_item[self::CART_ITEM_DATA_INDEX_PAYMENT_SCHEDULE]->get_terms();
-                foreach ($item_payment_terms as $item_payment_term) {
-                    if (isset($cart_payment_schedule[$item_payment_term['date']])){
-                        $cart_payment_schedule[$item_payment_term['date']] += $item_payment_term['amount'];
-                    } else {
-                        $cart_payment_schedule[$item_payment_term['date']]  = $item_payment_term['amount'];
-                    }
-                }
-            }
-        }
+        $cart_payment_schedule = Payment_Schedule::create_cart_payment_schedule();
 
         if (count($cart_payment_schedule) > 1 ) {
             wc_get_template( 'cart/payment_schedule.php', array('payment_schedule'    => $cart_payment_schedule),'',WC_PAYMENT_SCHEDULE_PLUGIN_PATH . '/templates/' );

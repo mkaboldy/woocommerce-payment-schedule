@@ -15,12 +15,19 @@ class WC_PS_Order {
      *
      * This will normally be an instance of 'WC_Order'.
      *
-     * @var mixed
+     * @var WC_Order
      */
     private $order;
 
     private $payment_schedule;
     private $payment_history;
+
+    // order meta keys
+
+    const META_KEY_PAYMENT_SCHEDULE = 'payment_schedule';
+    const META_KEY_PAYMENT_HISTORY = 'payment_history';
+    const META_KEY_BALANCE_PAID = 'balance_paid';
+    const META_KEY_BALANCE_DUE = 'balance_due';
 
     /**
      * Set the order object to enhance.
@@ -29,7 +36,13 @@ class WC_PS_Order {
      */
     public function __construct(WC_Order $order ) {
         $this->order = $order;
+
         $this->payment_schedule = new Payment_Schedule();
+        $payment_terms = get_post_meta($order->get_id(), self::META_KEY_PAYMENT_SCHEDULE,true);
+        foreach ($payment_terms as $date => $amount) {
+            $this->payment_schedule->add_term($amount, $date);
+        }
+
         $this->payment_history = new Payment_History();
     }
 
@@ -54,6 +67,9 @@ class WC_PS_Order {
         return call_user_func_array( [ $this->order, $name ], $arguments );
     }
 
+    public function create_payment_schedule() {
+        update_post_meta($this->order->get_id(),self::META_KEY_PAYMENT_SCHEDULE,Payment_Schedule::create_cart_payment_schedule());
+    }
     /**
      * Tells if the order has payment schedule
      * @return boolean
@@ -67,6 +83,10 @@ class WC_PS_Order {
      */
     public function get_payment_schedule() {
         return $this->payment_schedule->get_terms();
+    }
+
+    public function get_first_amount() {
+        return $this->payment_schedule->get_first_amount();
     }
     /**
      * Tells if the order has a payment history
