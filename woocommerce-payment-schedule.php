@@ -3,7 +3,7 @@
 Plugin Name: WooCommerce Payment Schedule
 Plugin URI: https://github.com/mkaboldy/woocommerce-payment-schedule
 Description: Extends WooCommerce with payment schedule and partial payments
-Version: 0.1
+Version: 0.2
 Author: Miklos Kaboldy
 WC tested up to: 3.4.4
 Text Domain: wc-payment-schedule
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define( 'WC_PAYMENT_SCHEDULE_PLUGIN_VERSION','0.1');
+define( 'WC_PAYMENT_SCHEDULE_PLUGIN_VERSION','0.2');
 define( 'WC_PAYMENT_SCHEDULE_PLUGIN_PATH' , dirname( __FILE__ ));
 define( 'WC_PAYMENT_SCHEDULE_PLUGIN_URL' , plugins_url('', __FILE__ ));
 

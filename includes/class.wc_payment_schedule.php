@@ -29,8 +29,10 @@ class WC_Payment_Schedule {
         add_filter( 'woocommerce_order_get_total' , array($this,'checkout_payment_amount'), 10, 2); // get the first term for checkout
 
         // UI
-        add_action( 'woocommerce_cart_totals_after_order_total', array($this,'after_order_total'));
-        add_action( 'woocommerce_review_order_after_order_total', array($this,'after_order_total'));
+        add_action( 'woocommerce_cart_totals_after_order_total', array($this,'after_cart_order_total'));
+        add_action( 'woocommerce_review_order_after_order_total', array($this,'after_cart_order_total'));
+        add_action( 'woocommerce_thankyou', array($this,'after_order_total'), 9, 1);
+        add_action( 'woocommerce_email_after_order_table', array($this,'email_after_order_table'), 10, 5);
     }
 
     /**
@@ -61,7 +63,7 @@ class WC_Payment_Schedule {
      */
     public function checkout_update_order_meta($order_id, $data) {
         $order = new WC_PS_Order(wc_get_order($order_id));
-        $order->create_payment_schedule();
+        $order->save_payment_schedule();
         return;
     }
     /**
@@ -72,32 +74,66 @@ class WC_Payment_Schedule {
      * @return mixed
      */
     public function checkout_payment_amount($amount, $order) {
-		if (is_checkout() ) {
 
-            // do this only once
-            remove_filter(current_filter(),array($this,__FUNCTION__));
+        global $wp;
 
-            $order = new WC_PS_Order(wc_get_order($order));
+        if (!is_checkout() ) {
+            return $amount;
+        }
 
-            if ($order->has_payment_schedule()) {
-                return $order->get_first_amount();
-            }
-		}
+        if (get_query_var('order-received')) {
+            return $amount;
+        }
+
+        // do this only once
+        remove_filter(current_filter(),array($this,__FUNCTION__));
+
+        $order = new WC_PS_Order(wc_get_order($order));
+
+        if ($order->has_payment_schedule()) {
+            return $order->get_first_amount();
+        }
         return $amount;
     }
-
     /**
      * Collect and print the payment schedule on the cart page, if applicable
      * @hook woocommerce_cart_totals_after_order_total
      * @hook woocommerce_review_order_after_order_total
+     * Summary of after_cart_order_total
      */
-    public function after_order_total(){
-        wp_enqueue_style('wc-payment-schedule', WC_PAYMENT_SCHEDULE_PLUGIN_URL . '/assets/css/wc-payment-schedule.css', [] , WC_PAYMENT_SCHEDULE_PLUGIN_VERSION);
-
+    public function after_cart_order_total() {
         $cart_payment_schedule = Payment_Schedule::create_cart_payment_schedule();
-
         if (count($cart_payment_schedule) > 1 ) {
+            wp_enqueue_style('wc-payment-schedule', WC_PAYMENT_SCHEDULE_PLUGIN_URL . '/assets/css/wc-payment-schedule.css', [] , WC_PAYMENT_SCHEDULE_PLUGIN_VERSION);
             wc_get_template( 'cart/payment_schedule.php', array('payment_schedule'    => $cart_payment_schedule),'',WC_PAYMENT_SCHEDULE_PLUGIN_PATH . '/templates/' );
+        }
+    }
+
+    /**
+     * Collect and print the order payment schedule
+     * @hook woocommerce_thankyou
+     * @param int $order_id
+     */
+    public function after_order_total($order_id){
+
+        $ps_order = new WC_PS_Order(wc_get_order($order_id));
+
+        $order_payment_schedule = $ps_order->create_payment_schedule();
+
+        if (count($order_payment_schedule) > 1 ) {
+            wp_enqueue_style('wc-payment-schedule', WC_PAYMENT_SCHEDULE_PLUGIN_URL . '/assets/css/wc-payment-schedule.css', [] , WC_PAYMENT_SCHEDULE_PLUGIN_VERSION);
+            wc_get_template( 'order/payment_schedule.php', array('payment_schedule'    => $order_payment_schedule),'',WC_PAYMENT_SCHEDULE_PLUGIN_PATH . '/templates/' );
+        }
+    }
+
+    public function email_after_order_table($order, $sent_to_admin, $plain_text, $email ) {
+
+        $ps_order = new WC_PS_Order($order);
+
+        $order_payment_schedule = $ps_order->create_payment_schedule();
+
+        if (count($order_payment_schedule) > 1 ) {
+            wc_get_template( 'email/payment_schedule.php', array('payment_schedule'    => $order_payment_schedule),'',WC_PAYMENT_SCHEDULE_PLUGIN_PATH . '/templates/' );
         }
     }
     /**

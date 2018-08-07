@@ -33,10 +33,10 @@ class Payment_Schedule {
                 $item_payment_terms =  $item_payment_schedule->get_terms();
             }
             foreach ($item_payment_terms as $item_payment_term) {
-                if (isset($cart_payment_schedule[$item_payment_term['date']])){
-                    $cart_payment_schedule[$item_payment_term['date']] += $item_payment_term['amount'];
+                if (isset($cart_payment_schedule[$item_payment_term[self::INDEX_DATE]])){
+                    $cart_payment_schedule[$item_payment_term[self::INDEX_DATE]] += $item_payment_term[self::INDEX_AMOUNT];
                 } else {
-                    $cart_payment_schedule[$item_payment_term['date']]  = $item_payment_term['amount'];
+                    $cart_payment_schedule[$item_payment_term[self::INDEX_DATE]]  = $item_payment_term[self::INDEX_AMOUNT];
                 }
             }
         }
@@ -51,6 +51,16 @@ class Payment_Schedule {
             self::INDEX_AMOUNT => $amount,
             self::INDEX_DATE => $date,
             ];
+    }
+
+    public function create_payment_schedule() {
+        $payment_schedule = array();
+
+        foreach ( $this->terms as $term) {
+            $payment_schedule[$term[self::INDEX_DATE]] = $term[self::INDEX_AMOUNT];
+        }
+
+        return $payment_schedule;
     }
 
     public function get_first_amount() {

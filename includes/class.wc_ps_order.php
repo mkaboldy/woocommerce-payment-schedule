@@ -39,8 +39,10 @@ class WC_PS_Order {
 
         $this->payment_schedule = new Payment_Schedule();
         $payment_terms = get_post_meta($order->get_id(), self::META_KEY_PAYMENT_SCHEDULE,true);
-        foreach ($payment_terms as $date => $amount) {
-            $this->payment_schedule->add_term($amount, $date);
+        if (is_array($payment_terms)) {
+            foreach ($payment_terms as $date => $amount) {
+                $this->payment_schedule->add_term($amount, $date);
+            }
         }
 
         $this->payment_history = new Payment_History();
@@ -67,7 +69,7 @@ class WC_PS_Order {
         return call_user_func_array( [ $this->order, $name ], $arguments );
     }
 
-    public function create_payment_schedule() {
+    public function save_payment_schedule() {
         update_post_meta($this->order->get_id(),self::META_KEY_PAYMENT_SCHEDULE,Payment_Schedule::create_cart_payment_schedule());
     }
     /**
@@ -102,6 +104,11 @@ class WC_PS_Order {
     public function get_payment_history() {
         return $this->payment_history->get_payments();
     }
+
+    public function create_payment_schedule() {
+        return $this->payment_schedule->create_payment_schedule();
+    }
+
     /**
      * Get manual payments.
      *
