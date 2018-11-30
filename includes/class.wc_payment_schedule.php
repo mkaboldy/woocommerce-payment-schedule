@@ -8,6 +8,8 @@ class WC_Payment_Schedule {
 
     const CART_ITEM_DATA_INDEX_PAYMENT_SCHEDULE = 'payment_schedule';
 
+    const POST_STATUS_PARTIAL = 'wc-partial';
+
     // option key constants
 
     // action and filter keys
@@ -19,20 +21,31 @@ class WC_Payment_Schedule {
     // ajax action
 
     public function __construct() {
+
         // Action hooks
         add_action( 'woocommerce_register_shop_order_post_statuses', array($this,'register_shop_order_post_statuses'),10,1);
-        add_action( 'add_meta_boxes', [ $this, 'register_meta_box' ], 10, 2 );
+        add_filter( 'wc_order_statuses', array($this,'wc_order_statuses'), 10, 1);
+        add_filter( 'woocommerce_valid_order_statuses_for_payment', array($this,'valid_order_statuses_for_payment'), 10, 2);
 
         // business logic
         add_filter( self::FILTER_CREATE_CART_ITEM_TERMS , array($this,'create_cart_item_terms' ), 10, 3); // private hook, host app must call it
         add_action( 'woocommerce_checkout_update_order_meta', array($this,'checkout_update_order_meta'), 10, 2); // store payment schedule in order record
         add_filter( 'woocommerce_order_get_total' , array($this,'checkout_payment_amount'), 10, 2); // get the first term for checkout
+        add_action( 'wp_loaded', array($this,'wp_loaded')); // conditionally manage order status (partial/completed)
+        add_filter( 'wc_order_is_editable', array($this,'order_is_editable'), 10, 2); // partially paid orders should be editable
 
         // UI
         add_action( 'woocommerce_cart_totals_after_order_total', array($this,'after_cart_order_total'));
         add_action( 'woocommerce_review_order_after_order_total', array($this,'after_cart_order_total'));
         add_action( 'woocommerce_thankyou', array($this,'after_order_total'), 9, 1);
         add_action( 'woocommerce_email_after_order_table', array($this,'email_after_order_table'), 10, 5);
+
+        // admin
+
+        add_filter( 'manage_shop_order_posts_columns', array( $this, 'shop_order_posts_columns' ), 11);
+        add_action( 'manage_shop_order_posts_custom_column', array( $this, 'shop_order_posts_custom_column' ), 10, 2 );
+        add_filter( 'add_meta_boxes', [ $this, 'register_meta_box' ], 10, 2 );
+
     }
 
     /**
@@ -95,6 +108,89 @@ class WC_Payment_Schedule {
         }
         return $amount;
     }
+
+    public function wp_loaded(){
+        if (class_exists('WC_Rent_Payment_Gateway')) {
+            // mark payment partial/complete upon payment success
+            add_filter( WC_Rent_Payment_Gateway::FILTER_PAYMENT_SUCCESS_ORDER_STATUS , array($this,'payment_success_order_status'), 10, 2);
+            add_filter( WC_Rent_Payment_Gateway::FILTER_PAYMENT_SUCCESS_ORDER_STATUS_MSG , array($this,'payment_success_order_status_msg'), 10, 2);
+        } else {
+            add_action( 'woocommerce_payment_successful_result', array($this,'payment_successful_result_status'), 11, 2); // mark payment partial/complete after payment success
+        }
+        add_action( 'woocommerce_payment_successful_result', array($this,'payment_successful_result_history'), 10, 2); // add item to payment history
+    }
+
+    public function payment_successful_result_history( $payment_processing_result, $order_id ) {
+
+        $wc_ps_order = new WC_PS_Order(wc_get_order( $order_id ));
+
+        if ($wc_ps_order->has_payment_schedule()) {
+            $first_amount =  $wc_ps_order->get_first_amount();
+            $wc_ps_order->add_payment_history_item($first_amount,date('d/m/Y'));
+            $wc_ps_order->save_payment_history();
+        }
+    }
+
+    /**
+     * - set order status partial/completed
+     * @hook woocommerce_payment_successful_result
+     * @param array $result
+     * @param int $order_id
+     */
+    public function payment_successful_result_status($result, $order_id) {
+        $order = new WC_PS_Order(wc_get_order($order_id));
+        try {
+            if ($order->get_total_amount_unpaid() > 0) {
+                $order->set_status(self::POST_STATUS_PARTIAL);
+                $order->save();
+            }
+		} catch ( Exception $e ) {
+			$logger = wc_get_logger();
+			$logger->error(
+				sprintf( 'Error updating status for order #%d', $order_id ), array(
+					'order' => $order,
+					'error' => $e,
+				)
+			);
+			$order->add_order_note( __( 'Update status event failed.', 'woocommerce' ) . ' ' . $e->getMessage() );
+			return false;
+		}
+
+        return $result;
+    }
+
+    function payment_success_order_status($status, WC_order $order) {
+        $ps_order = new WC_PS_Order($order);
+        if ($ps_order->get_total_amount_unpaid() > 0) {
+            return self::POST_STATUS_PARTIAL;
+        }
+        return $status;
+    }
+
+    function payment_success_order_status_msg($status_msg, WC_order $order) {
+        $ps_order = new WC_PS_Order($order);
+        if ($ps_order->get_total_amount_unpaid() > 0) {
+            return __( 'Payment partially completed', self::TEXTDOMAIN );
+        }
+        return $status_msg;
+    }
+
+    /**
+     * Allow editing partial orders
+     * @hook wc_order_is_editable
+     * @param bool $editable
+     * @param WC_Order $order
+     * @return boolean
+     */
+    public function order_is_editable($editable,WC_Order $order) {
+
+        $status_partial = substr(self::POST_STATUS_PARTIAL,3); // TODO this is crazy
+        $is_partial = $order->has_status($status_partial);
+        $editable = $editable || $is_partial;
+
+        return $editable;
+    }
+
     /**
      * Collect and print the payment schedule on the cart page, if applicable
      * @hook woocommerce_cart_totals_after_order_total
@@ -126,7 +222,15 @@ class WC_Payment_Schedule {
         }
     }
 
-    public function email_after_order_table($order, $sent_to_admin, $plain_text, $email ) {
+    /**
+     * Insterts the payment schedule in order emails
+     * @hook woocommerce_email_after_order_table
+     * @param mixed WC_Order $order
+     * @param bool $sent_to_admin
+     * @param bool  $plain_text
+     * @param string $email
+     */
+    public function email_after_order_table(WC_Order $order, $sent_to_admin, $plain_text, $email ) {
 
         $ps_order = new WC_PS_Order($order);
 
@@ -137,25 +241,74 @@ class WC_Payment_Schedule {
         }
     }
     /**
-     * add post status "partial"
+     * add post status "partial" for partially paid orders
      * @hook woocommerce_register_shop_order_post_statuses
-     * @param mixed $statuses
+     * @param array $statuses
      * @return array
      */
-    function register_shop_order_post_statuses($statuses){
+    public function register_shop_order_post_statuses($statuses){
         $statuses = array_merge($statuses,array(
-				'wc-partial'    => array(
-					'label'                     => _x( 'Partial payment', 'Order status', 'woocommerce' ),
+				self::POST_STATUS_PARTIAL    => array(
+					'label'                     => _x( 'Partial payment', 'Order status', self::TEXTDOMAIN ),
 					'public'                    => false,
 					'exclude_from_search'       => false,
 					'show_in_admin_all_list'    => true,
 					'show_in_admin_status_list' => true,
 					/* translators: %s: number of orders */
-					'label_count'               => _n_noop( 'Partial payment <span class="count">(%s)</span>', 'Partial payment <span class="count">(%s)</span>', 'woocommerce' ),
+					'label_count'               => _n_noop( 'Partial payment <span class="count">(%s)</span>', 'Partial payment <span class="count">(%s)</span>', self::TEXTDOMAIN ),
 				),
             ));
         return $statuses;
     }
+    /**
+     * Adds 'Partial' order status label
+     * @hook wc_order_statuses
+     * @param array $statuses
+     * @return array
+     */
+    public function wc_order_statuses($statuses) {
+        return array_merge($statuses, array(
+            		self::POST_STATUS_PARTIAL     => _x( 'Partial', 'Order status', self::TEXTDOMAIN ),
+            ));
+    }
+    /**
+     * Adds 'partial' status to needs_payment() condition
+     * @hook woocommerce_valid_order_statuses_for_payment
+     * @param array $statuses
+     * @param WC_Order $order
+     * @return array
+     */
+    function valid_order_statuses_for_payment($statuses, $order) {
+        $statuses = array_merge($statuses, array(self::POST_STATUS_PARTIAL));
+        return $statuses;
+    }
+
+    /**
+     * Adds balance column to shop order admin overview
+     * @hook manage_shop_order_posts_columns
+     * @param array $columns
+     * @return array
+     */
+    function shop_order_posts_columns($columns) {
+        $columns['balance'] =  __('Balance',self::TEXTDOMAIN);
+        return $columns;
+    }
+
+    /**
+     * Renders the balance column in shop order admin overview
+     * @hook manage_shop_order_posts_custom_column
+     * @param string $column
+     * @param int $post_id
+     */
+    function shop_order_posts_custom_column($column, $post_id) {
+        $ps_order = new WC_PS_Order(wc_get_order($post_id));
+        switch ($column) {
+            case 'balance':
+                echo wc_price($ps_order->get_total_amount_unpaid() , array( 'currency' => $ps_order->get_currency() ));
+                break;
+        }
+    }
+
     /**
      * Define the admin metaboxes
      * @hook add_meta_boxes

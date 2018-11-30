@@ -23,4 +23,7 @@ class Payment_History {
     public function get_payments(){
         return $this->payments;
     }
+    public function get_sum_payments(){
+        return array_sum(array_column( $this->payments, self::INDEX_AMOUNT ));
+    }
 }

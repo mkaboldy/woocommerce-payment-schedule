@@ -5,8 +5,10 @@ Wordpress plugin to extend WooCommerce with payment schedule and partial payment
 
 ## version history
 
-### 0.2 Additional templates with the payment schedule on order overview and order emails
+#### 0.3
 
-### 0.1 Checkout and order record with payment terms
+#### 0.2 Additional templates with the payment schedule on order overview and order emails
 
-### 0.0 Initial upload
+#### 0.1 Checkout and order record with payment terms
+
+#### 0.0 Initial upload

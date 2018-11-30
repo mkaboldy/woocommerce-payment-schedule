@@ -6,8 +6,6 @@
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
-
-$text_align = is_rtl() ? 'right' : 'left';
 ?>
 <h2>Payment Schedule</h2>
 

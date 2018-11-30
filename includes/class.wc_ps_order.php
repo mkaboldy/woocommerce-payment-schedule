@@ -46,6 +46,12 @@ class WC_PS_Order {
         }
 
         $this->payment_history = new Payment_History();
+        $payment_history = get_post_meta($order->get_id(), self::META_KEY_PAYMENT_HISTORY,true);
+        if (is_array($payment_history)) {
+            foreach ($payment_history as $date => $amount) {
+                $this->payment_history->add_payment($amount, $date);
+            }
+        }
     }
 
     /**
@@ -72,6 +78,11 @@ class WC_PS_Order {
     public function save_payment_schedule() {
         update_post_meta($this->order->get_id(),self::META_KEY_PAYMENT_SCHEDULE,Payment_Schedule::create_cart_payment_schedule());
     }
+
+    public function save_payment_history() {
+        update_post_meta($this->order->get_id(),self::META_KEY_PAYMENT_HISTORY,$this->payment_history);
+    }
+
     /**
      * Tells if the order has payment schedule
      * @return boolean
@@ -163,7 +174,12 @@ class WC_PS_Order {
      * @return float The amount.
      */
     public function get_total_amount_paid() {
-        return array_sum( array_column( $this->get_woo_mp_payments(), 'amount' ) );
+
+        if ($this->has_payment_history()) {
+            return $this->payment_history->get_sum_payments();
+        } else {
+            return $this->get_total();
+        }
     }
 
     /**
@@ -177,4 +193,7 @@ class WC_PS_Order {
         return $this->order->get_total() - $this->get_total_amount_paid();
     }
 
+    public function add_payment_history_item($amount, $date) {
+        $this->payment_history->add_payment($amount, $date);
+    }
 }
